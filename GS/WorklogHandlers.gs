@@ -34,14 +34,17 @@ function handleSubmitWorklog(params) {
     const date = params.date;
     const hours = params.hours;
     const content = params.content;
-    
+    const customerId = params.customerId || '';
+    const customerName = params.customerName || '';
+
     Logger.log(' 收到的參數:');
     Logger.log('   日期: ' + date);
     Logger.log('   時數: ' + hours);
     Logger.log('   內容長度: ' + (content ? content.length : 0));
-    
+    Logger.log('   客戶: ' + (customerName || '（無）'));
+
     // 呼叫核心函數
-    const result = submitWorklog(userId, userName, department, date, hours, content);
+    const result = submitWorklog(userId, userName, department, date, hours, content, customerId, customerName);
     
     Logger.log(' 處理結果: ' + result.success);
     Logger.log('═══════════════════════════════════════');

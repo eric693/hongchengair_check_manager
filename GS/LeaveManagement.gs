@@ -762,6 +762,8 @@ function reviewLeaveRequest(sessionToken, rowNumber, reviewAction, comment) {
     const userId = record[1];
     const employeeName = record[2];
     const leaveType = record[4];
+    const startDateTime = record[5];
+    const endDateTime = record[6];
     const workHours = record[7];
     const days = record[8];
     
@@ -802,8 +804,42 @@ function reviewLeaveRequest(sessionToken, rowNumber, reviewAction, comment) {
       Logger.log(' 假期餘額扣除成功');
       Logger.log(`   ${leaveType}: 扣除 ${workHours} 小時`);
       Logger.log(`   剩餘: ${deductResult.remaining} 小時`);
+
+      // ⭐ 請假核准後自動重算並儲存薪資（涵蓋請假起訖跨月的情況）
+      try {
+        const yearMonths = new Set();
+
+        const start = new Date(startDateTime);
+        if (!isNaN(start.getTime())) {
+          yearMonths.add(Utilities.formatDate(start, 'Asia/Taipei', 'yyyy-MM'));
+        }
+
+        const end = new Date(endDateTime);
+        if (!isNaN(end.getTime())) {
+          yearMonths.add(Utilities.formatDate(end, 'Asia/Taipei', 'yyyy-MM'));
+        }
+
+        yearMonths.forEach(yearMonth => {
+          Logger.log(` 開始更新 ${employeeName} 的 ${yearMonth} 薪資...`);
+
+          const recalcResult = calculateMonthlySalary(userId, yearMonth);
+
+          if (recalcResult.success) {
+            const saveResult = saveMonthlySalary(recalcResult.data);
+            if (saveResult.success) {
+              Logger.log(` 已自動更新 ${employeeName} 的 ${yearMonth} 薪資`);
+            } else {
+              Logger.log(` 薪資儲存失敗: ${saveResult.message}`);
+            }
+          } else {
+            Logger.log(` 薪資計算失敗: ${recalcResult.message}`);
+          }
+        });
+      } catch (recalcError) {
+        Logger.log(` 自動更新薪資時發生錯誤: ${recalcError.message}`);
+      }
     }
-    
+
     Logger.log('');
     Logger.log('═══════════════════════════════════════');
     Logger.log(' 審核完成');

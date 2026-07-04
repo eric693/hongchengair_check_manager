@@ -253,8 +253,8 @@ function getMonthlySalarySheetEnhanced() {
       // 法定扣款
       "勞保費", "健保費", "就業保險費", "勞退自提", "所得稅",
       
-      // 其他扣款
-      "請假扣款", "福利金扣款", "宿舍費用", "團保費用", "其他扣款",
+      // 其他扣款 ⭐ 修正：補回「早退扣款」欄位（row 陣列一直都有寫入此值，但標題列原本漏了這一欄）
+      "請假扣款", "早退扣款", "福利金扣款", "宿舍費用", "團保費用", "其他扣款",
 
       // ⭐⭐⭐ 新增這 4 欄
       "病假時數", "病假扣款", "事假時數", "事假扣款",
@@ -266,19 +266,60 @@ function getMonthlySalarySheetEnhanced() {
       "銀行代碼", "銀行帳號",
       
       // 系統欄位
-      "狀態", "備註", "建立時間"
+      "狀態", "備註", "建立時間",
+
+      // ⭐ 新增：遲到／曠職扣款
+      "遲到扣款", "曠職天數", "曠職扣款"
     ];
-    
+
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
     sheet.getRange(1, 1, 1, headers.length).setBackground("#10b981");
     sheet.getRange(1, 1, 1, headers.length).setFontColor("#ffffff");
     sheet.setFrozenRows(1);
-    
+
     Logger.log(" 建立月薪資記錄試算表（完整版）");
+  } else {
+    // ⭐ 既有試算表：非破壞性地補上新欄位（不刪除既有資料）
+    ensureMonthlySalaryExtendedColumns_(sheet);
   }
-  
+
   return sheet;
+}
+
+/**
+ *  非破壞性地為既有「月薪資記錄」試算表補上新欄位（不刪除既有資料）
+ */
+function ensureMonthlySalaryExtendedColumns_(sheet) {
+  try {
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
+    // ⚠️ 這 3 欄可安全地補在最後面（純新增，不影響既有欄位順序）
+    const appendableHeaders = ["遲到扣款", "曠職天數", "曠職扣款"];
+    const missingHeaders = appendableHeaders.filter(h => headers.indexOf(h) === -1);
+
+    if (missingHeaders.length > 0) {
+      sheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setValues([missingHeaders]);
+      sheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setFontWeight("bold");
+      sheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setBackground("#10b981");
+      sheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setFontColor("#ffffff");
+      Logger.log(" 已為月薪資記錄表補上欄位: " + missingHeaders.join(", "));
+    }
+
+    // ⚠️ 「例假日加班費」「早退扣款」必須插在中間（緊接在既有欄位之間）才能對齊 saveMonthlySalary 寫入的欄位順序，
+    // 無法用「加在最後」的方式安全修正既有試算表，因此只記警告，不自動處理。
+    // 若偵測到舊試算表缺少這兩欄，代表這份試算表是在本次修正前建立的，其「國定假日出勤薪資」之後的欄位
+    // 很可能已經錯位，建議：確認目前是否有正式薪資資料 → 若無，刪除本表後讓系統重建；若有，備份後針對每個月份重新
+    // 呼叫 calculateMonthlySalary + saveMonthlySalary 以覆寫回正確欄位。
+    if (headers.indexOf('例假日加班費') === -1 || headers.indexOf('早退扣款') === -1) {
+      Logger.log(' 警告：此「月薪資記錄」試算表缺少「例假日加班費」或「早退扣款」標題欄位，');
+      Logger.log('   代表這是修正前建立的舊試算表，「國定假日出勤薪資」之後的欄位可能已經錯位寫入，');
+      Logger.log('   請人工確認並視需要重建試算表、重新計算歷史薪資。');
+    }
+  } catch (error) {
+    Logger.log(" ensureMonthlySalaryExtendedColumns_ 失敗: " + error.message);
+  }
 }
 
 function rebuildMonthlySalarySheet() {
@@ -792,7 +833,10 @@ function saveMonthlySalary(salaryData) {
       salaryData.totalWorkHours || salaryData['工作時數'] || 0,    // G (col 7)
       salaryData.totalOvertimeHours || salaryData['總加班時數'] || 0, // H (col 8)
       
-      // === 應發項目（11欄：I-S）===
+      // === 應發項目（12欄：I-T）===
+      // ⭐⭐⭐ 修正：欄位順序必須與標題列（P-T：平日/休息日/例假日/國定假日/國定假日出勤）完全一致，
+      // 先前少了「例假日加班費」一欄，導致此欄位之後的所有欄位（法定扣款、其他扣款、總計、銀行資訊…）
+      // 全部被錯位寫入標題左移一欄的儲存格。
       salaryData.baseSalary || salaryData['基本薪資'] || 0,              // I (col 9)
       salaryData.positionAllowance || salaryData['職務加給'] || 0,       // J (col 10)
       salaryData.mealAllowance || salaryData['伙食費'] || 0,             // K (col 11)
@@ -802,42 +846,48 @@ function saveMonthlySalary(salaryData) {
       salaryData.otherAllowances || salaryData['其他津貼'] || 0,         // O (col 15)
       salaryData.weekdayOvertimePay || salaryData['平日加班費'] || 0,    // P (col 16)
       salaryData.restdayOvertimePay || salaryData['休息日加班費'] || 0,  // Q (col 17)
-      salaryData.holidayWorkPay || salaryData['國定假日出勤薪資'] || 0,  // R (col 18)
+      salaryData.sundayOvertimePay || salaryData['例假日加班費'] || 0,   // R (col 18) ⭐ 新增補回
       salaryData.holidayOvertimePay || salaryData['國定假日加班費'] || 0, // S (col 19)
-      
-      // === 法定扣款（5欄：T-X）===
-      salaryData.laborFee || salaryData['勞保費'] || 0,                  // T (col 20)
-      salaryData.healthFee || salaryData['健保費'] || 0,                 // U (col 21)
-      salaryData.employmentFee || salaryData['就業保險費'] || 0,         // V (col 22)
-      salaryData.pensionSelf || salaryData['勞退自提'] || 0,             // W (col 23)
-      salaryData.incomeTax || salaryData['所得稅'] || 0,                 // X (col 24)
-      
-      // === 其他扣款（6欄：Y-AD）⭐ 包含早退扣款 ===
-      salaryData.leaveDeduction || salaryData['請假扣款'] || 0,          // Y (col 25)
-      salaryData.earlyLeaveDeduction || salaryData['早退扣款'] || 0,     // Z (col 26) ⭐⭐⭐
-      salaryData.welfareFee || salaryData['福利金扣款'] || 0,            // AA (col 27)
-      salaryData.dormitoryFee || salaryData['宿舍費用'] || 0,            // AB (col 28)
-      salaryData.groupInsurance || salaryData['團保費用'] || 0,          // AC (col 29)
-      salaryData.otherDeductions || salaryData['其他扣款'] || 0,         // AD (col 30)
-      
-      // === 請假明細（4欄：AE-AH）===
-      salaryData.sickLeaveHours || salaryData['病假時數'] || 0,          // AE (col 31)
-      salaryData.sickLeaveDeduction || salaryData['病假扣款'] || 0,      // AF (col 32)
-      salaryData.personalLeaveHours || salaryData['事假時數'] || 0,      // AG (col 33)
-      salaryData.personalLeaveDeduction || salaryData['事假扣款'] || 0,  // AH (col 34)
-      
-      // === 總計（2欄：AI-AJ）===
-      salaryData.grossSalary || salaryData['應發總額'] || 0,             // AI (col 35)
-      salaryData.netSalary || salaryData['實發金額'] || 0,               // AJ (col 36)
-      
-      // === 銀行資訊（2欄：AK-AL）===
-      salaryData.bankCode || salaryData['銀行代碼'] || "",               // AK (col 37)
-      salaryData.bankAccount || salaryData['銀行帳號'] || "",            // AL (col 38)
-      
-      // === 系統欄位（3欄：AM-AO）===
-      salaryData.status || salaryData['狀態'] || "已計算",               // AM (col 39)
-      salaryData.note || salaryData['備註'] || "",                       // AN (col 40)
-      new Date()                                                         // AO (col 41)
+      salaryData.holidayWorkPay || salaryData['國定假日出勤薪資'] || 0,  // T (col 20)
+
+      // === 法定扣款（5欄：U-Y）===
+      salaryData.laborFee || salaryData['勞保費'] || 0,                  // U (col 21)
+      salaryData.healthFee || salaryData['健保費'] || 0,                 // V (col 22)
+      salaryData.employmentFee || salaryData['就業保險費'] || 0,         // W (col 23)
+      salaryData.pensionSelf || salaryData['勞退自提'] || 0,             // X (col 24)
+      salaryData.incomeTax || salaryData['所得稅'] || 0,                 // Y (col 25)
+
+      // === 其他扣款（7欄：Z-AF）⭐ 標題列已補回「早退扣款」欄位 ===
+      salaryData.leaveDeduction || salaryData['請假扣款'] || 0,          // Z (col 26)
+      salaryData.earlyLeaveDeduction || salaryData['早退扣款'] || 0,     // AA (col 27)
+      salaryData.welfareFee || salaryData['福利金扣款'] || 0,            // AB (col 28)
+      salaryData.dormitoryFee || salaryData['宿舍費用'] || 0,            // AC (col 29)
+      salaryData.groupInsurance || salaryData['團保費用'] || 0,          // AD (col 30)
+      salaryData.otherDeductions || salaryData['其他扣款'] || 0,         // AE (col 31)
+
+      // === 請假明細（4欄：AF-AI）===
+      salaryData.sickLeaveHours || salaryData['病假時數'] || 0,          // AF (col 32)
+      salaryData.sickLeaveDeduction || salaryData['病假扣款'] || 0,      // AG (col 33)
+      salaryData.personalLeaveHours || salaryData['事假時數'] || 0,      // AH (col 34)
+      salaryData.personalLeaveDeduction || salaryData['事假扣款'] || 0,  // AI (col 35)
+
+      // === 總計（2欄：AJ-AK）===
+      salaryData.grossSalary || salaryData['應發總額'] || 0,             // AJ (col 36)
+      salaryData.netSalary || salaryData['實發金額'] || 0,               // AK (col 37)
+
+      // === 銀行資訊（2欄：AL-AM）===
+      salaryData.bankCode || salaryData['銀行代碼'] || "",               // AL (col 38)
+      salaryData.bankAccount || salaryData['銀行帳號'] || "",            // AM (col 39)
+
+      // === 系統欄位（3欄：AN-AP）===
+      salaryData.status || salaryData['狀態'] || "已計算",               // AN (col 40)
+      salaryData.note || salaryData['備註'] || "",                       // AO (col 41)
+      new Date(),                                                        // AP (col 42)
+
+      // === 遲到／曠職扣款（3欄：AQ-AS）===
+      salaryData.lateArrivalDeduction || salaryData['遲到扣款'] || 0,    // AQ (col 43)
+      salaryData.absenceDays || salaryData['曠職天數'] || 0,             // AR (col 44)
+      salaryData.absenceDeduction || salaryData['曠職扣款'] || 0         // AS (col 45)
     ];
     
     Logger.log(` 準備寫入的 row 長度: ${row.length}`);
@@ -1261,6 +1311,60 @@ function getEmployeeMonthlyLeave(employeeId, yearMonth) {
   }
 }
 
+/**
+ *  取得員工該月份「已核准」請假涵蓋的日期集合（用於曠職判斷）
+ *
+ * @param {string} employeeId - 員工ID
+ * @param {string} yearMonth - 年月 (YYYY-MM)
+ * @returns {Object} { 'yyyy-MM-dd': true, ... }
+ */
+function getEmployeeApprovedLeaveDatesInMonth(employeeId, yearMonth) {
+  const dates = {};
+
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('請假紀錄');
+    if (!sheet) return dates;
+
+    const values = sheet.getDataRange().getValues();
+
+    for (let i = 1; i < values.length; i++) {
+      const row = values[i];
+
+      const rowEmployeeId = String(row[1] || '').trim();
+      if (rowEmployeeId !== employeeId) continue;
+
+      const status = String(row[10] || '').trim().toUpperCase();
+      if (status !== 'APPROVED' && status !== '核准') continue;
+
+      // ⭐ 「曠職」假別本身就代表未出勤，不能拿來當作豁免曠職扣款的請假理由，
+      // 否則會出現「補登一筆已核准曠職，該天反而不扣薪」的矛盾。
+      const leaveType = String(row[4] || '').trim().toUpperCase();
+      if (leaveType === 'ABSENCE_WITHOUT_LEAVE' || leaveType === '曠職') continue;
+
+      const startDateTime = row[5];
+      const endDateTime = row[6];
+
+      const start = new Date(startDateTime);
+      const end = new Date(endDateTime);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) continue;
+
+      const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+      const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+
+      for (let d = new Date(startDay); d <= endDay; d.setDate(d.getDate() + 1)) {
+        const dateStr = Utilities.formatDate(d, 'Asia/Taipei', 'yyyy-MM-dd');
+        if (dateStr.substring(0, 7) === yearMonth) {
+          dates[dateStr] = true;
+        }
+      }
+    }
+  } catch (error) {
+    Logger.log(' getEmployeeApprovedLeaveDatesInMonth 錯誤: ' + error.message);
+  }
+
+  return dates;
+}
+
 // ==================== 時薪計算功能 ====================
 
 /**
@@ -1417,6 +1521,7 @@ function calculateHourlySalary(employeeId, yearMonth) {
     // ⭐ 四捨五入
     weekdayOvertimePay = Math.round(weekdayOvertimePay);
     restdayOvertimePay = Math.round(restdayOvertimePay);
+    sundayOvertimePay = Math.round(sundayOvertimePay);
     holidayOvertimePay = Math.round(holidayOvertimePay);
     holidayWorkPay = Math.round(holidayWorkPay);
 
@@ -1424,6 +1529,7 @@ function calculateHourlySalary(employeeId, yearMonth) {
     Logger.log(`   - 總時數: ${totalOvertimeHours.toFixed(1)}h`);
     Logger.log(`   - 平日加班費: $${weekdayOvertimePay}`);
     Logger.log(`   - 休息日加班費: $${restdayOvertimePay}`);
+    Logger.log(`   - 例假日加班費: $${sundayOvertimePay}`);
     Logger.log(`   - 國定假日出勤薪資: $${holidayWorkPay}`);
     Logger.log(`   - 國定假日加班費: $${holidayOvertimePay}`);
     
@@ -1504,15 +1610,16 @@ function calculateHourlySalary(employeeId, yearMonth) {
     }
     
     // 9. 應發總額
-    const grossSalary = basePay + 
-                       positionAllowance + 
-                       mealAllowance + 
-                       transportAllowance + 
-                       attendanceBonus + 
-                       performanceBonus + 
+    const grossSalary = basePay +
+                       positionAllowance +
+                       mealAllowance +
+                       transportAllowance +
+                       attendanceBonus +
+                       performanceBonus +
                        otherAllowances +
-                       weekdayOvertimePay + 
+                       weekdayOvertimePay +
                        restdayOvertimePay +
+                       sundayOvertimePay +
                        holidayOvertimePay +
                        holidayWorkPay;
     
@@ -1611,6 +1718,7 @@ function calculateHourlySalary(employeeId, yearMonth) {
     Logger.log(`   加班時數: ${totalOvertimeHours.toFixed(1)}h`);
     Logger.log(`   - 平日加班費: $${weekdayOvertimePay}`);
     Logger.log(`   - 休息日加班費: $${restdayOvertimePay}`);
+    Logger.log(`   - 例假日加班費: $${sundayOvertimePay}`);
     Logger.log(`   - 國定假日出勤薪資: $${holidayWorkPay}`);
     Logger.log(`   - 國定假日加班費: $${holidayOvertimePay}`);
     if (leaveDeduction > 0) {
@@ -1642,6 +1750,7 @@ function calculateHourlySalary(employeeId, yearMonth) {
       otherAllowances: otherAllowances,
       weekdayOvertimePay: weekdayOvertimePay,
       restdayOvertimePay: restdayOvertimePay,
+      sundayOvertimePay: sundayOvertimePay,
       holidayOvertimePay: holidayOvertimePay,
       holidayWorkPay: holidayWorkPay,
       totalOvertimeHours: totalOvertimeHours,
@@ -2211,65 +2320,133 @@ function calculateMonthlySalaryInternal(employeeId, yearMonth) {
     Logger.log(`   - 國定假日出勤薪資: $${holidayWorkPay}`);
     Logger.log(`   - 國定假日加班費: $${holidayOvertimePay}`);
     
-    // 6.5 ⭐⭐⭐ 早退扣款（僅月薪員工）- 修正版
+    // 6.5 ⭐⭐⭐ 早退／遲到扣款（僅月薪員工）- 修正版
     let earlyLeaveDeduction = 0;
+    let lateArrivalDeduction = 0;
 
-    Logger.log(`\n 開始計算早退扣款...`);
+    Logger.log(`\n 開始計算早退／遲到扣款...`);
 
     // 取得該月份的打卡記錄
     const attendanceRecords = getEmployeeMonthlyAttendanceInternal(employeeId, yearMonth);
 
     attendanceRecords.forEach(record => {
       const date = record.date;
-      
+
       // ⭐⭐⭐ 使用 try-catch 避免錯誤中斷流程
       try {
         // 取得該日期的排班資訊
         const shiftResult = getEmployeeShiftForDate(employeeId, date);
-        
+
         if (shiftResult && shiftResult.success && shiftResult.hasShift) {
           const shift = shiftResult.data;
           const scheduledEndTime = shift.endTime;
           const actualEndTime = record.punchOut;
-          
+
           if (scheduledEndTime && actualEndTime) {
             // 解析時間（處理跨日班）
             const [schedHour, schedMin] = scheduledEndTime.split(':').map(Number);
             const [actualHour, actualMin] = actualEndTime.split(':').map(Number);
-            
+
             // 轉換為分鐘數（跨日班需要特殊處理）
             let schedMinutes = schedHour * 60 + schedMin;
             let actualMinutes = actualHour * 60 + actualMin;
-            
+
             // 如果是跨日班（下班時間 < 上班時間），下班時間加24小時
             if (schedHour < 12) {
               schedMinutes += 24 * 60;
             }
-            
+
             if (actualHour < 12 && record.punchIn && record.punchIn.startsWith('1')) {
               actualMinutes += 24 * 60;
             }
-            
+
             // 計算早退分鐘數
             if (actualMinutes < schedMinutes) {
               const earlyMinutes = schedMinutes - actualMinutes;
               const earlyHours = earlyMinutes / 60;
               const deduction = Math.round(hourlyRate * earlyHours);
-              
+
               earlyLeaveDeduction += deduction;
-              
+
               Logger.log(`   ${date}: 早退 ${earlyMinutes} 分鐘 (${earlyHours.toFixed(2)}h) → 扣款 $${deduction}`);
+            }
+          }
+
+          // ⭐ 遲到扣款：比對排班上班時間與實際打卡上班時間
+          const scheduledStartTime = shift.startTime;
+          const actualStartTime = record.punchIn;
+
+          if (scheduledStartTime && actualStartTime) {
+            const [schedStartHour, schedStartMin] = scheduledStartTime.split(':').map(Number);
+            const [actualStartHour, actualStartMin] = actualStartTime.split(':').map(Number);
+
+            const schedStartMinutes = schedStartHour * 60 + schedStartMin;
+            const actualStartMinutes = actualStartHour * 60 + actualStartMin;
+
+            if (actualStartMinutes > schedStartMinutes) {
+              const lateMinutes = actualStartMinutes - schedStartMinutes;
+              const lateHours = lateMinutes / 60;
+              const deduction = Math.round(hourlyRate * lateHours);
+
+              lateArrivalDeduction += deduction;
+
+              Logger.log(`   ${date}: 遲到 ${lateMinutes} 分鐘 (${lateHours.toFixed(2)}h) → 扣款 $${deduction}`);
             }
           }
         }
       } catch (shiftError) {
         // 如果取得排班失敗，記錄警告但繼續處理
-        Logger.log(`    ${date}: 無法取得排班資訊，跳過早退檢查`);
+        Logger.log(`    ${date}: 無法取得排班資訊，跳過早退／遲到檢查`);
       }
     });
 
     Logger.log(`\n 早退扣款統計:`);
     Logger.log(`   合計扣款: $${earlyLeaveDeduction}`);
+    Logger.log(`\n 遲到扣款統計:`);
+    Logger.log(`   合計扣款: $${lateArrivalDeduction}`);
+
+    // 6.6 ⭐⭐⭐ 曠職扣款（僅月薪員工）：有排班、無打卡、無核准請假
+    let absenceDays = 0;
+    let absenceDeduction = 0;
+
+    Logger.log(`\n 開始計算曠職扣款...`);
+
+    try {
+      const [ymYear, ymMonth] = yearMonth.split('-').map(Number);
+      const monthStart = `${yearMonth}-01`;
+      const daysInMonth = new Date(ymYear, ymMonth, 0).getDate();
+      const monthEnd = `${yearMonth}-${String(daysInMonth).padStart(2, '0')}`;
+
+      const shiftsResult = getShifts({ employeeId: employeeId, startDate: monthStart, endDate: monthEnd });
+      const rawScheduledDates = (shiftsResult && shiftsResult.success) ? shiftsResult.data.map(s => s.date) : [];
+      const scheduledDates = Array.from(new Set(rawScheduledDates)); // 去除同日多筆排班造成的重複
+
+      const punchedDates = {};
+      attendanceRecords.forEach(record => {
+        if (record.punchIn) punchedDates[record.date] = true;
+      });
+
+      const approvedLeaveDates = getEmployeeApprovedLeaveDatesInMonth(employeeId, yearMonth);
+      const todayStr = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd');
+      const dailyRateForAbsence = Math.round(baseSalary / 30);
+
+      scheduledDates.forEach(date => {
+        if (date > todayStr) return; // 未來排班不算曠職
+        if (punchedDates[date]) return;
+        if (approvedLeaveDates[date]) return;
+
+        absenceDays++;
+        absenceDeduction += dailyRateForAbsence;
+
+        Logger.log(`   ${date}: 曠職（有排班但無打卡、無核准請假）→ 扣款 $${dailyRateForAbsence}`);
+      });
+    } catch (absenceError) {
+      Logger.log(` 曠職檢查失敗: ${absenceError.message}`);
+    }
+
+    Logger.log(`\n 曠職扣款統計:`);
+    Logger.log(`   曠職天數: ${absenceDays} 天`);
+    Logger.log(`   合計扣款: $${absenceDeduction}`);
     
     // 7. 請假扣款
     let leaveDeduction = 0;
@@ -2325,7 +2502,13 @@ function calculateMonthlySalaryInternal(employeeId, yearMonth) {
       Logger.log(`   合計扣款: $0`);
       Logger.log(` 無請假記錄`);
     }
-    
+
+    // 如果有曠職，取消全勤獎金
+    if (absenceDays > 0) {
+      attendanceBonus = 0;
+      Logger.log(` 有曠職記錄，取消全勤獎金`);
+    }
+
     // 8. ⭐⭐⭐ 法定扣款（直接使用設定表中的數值）
     const laborFee = parseFloat(config['勞保費']) || 0;
     const healthFee = parseFloat(config['健保費']) || 0;
@@ -2370,16 +2553,18 @@ function calculateMonthlySalaryInternal(employeeId, yearMonth) {
                        holidayWorkPay;
     
     // 11. 扣款總額
-    const totalDeductions = laborFee + 
-                           healthFee + 
-                           employmentFee + 
-                           pensionSelf + 
+    const totalDeductions = laborFee +
+                           healthFee +
+                           employmentFee +
+                           pensionSelf +
                            incomeTax +
-                           leaveDeduction + 
+                           leaveDeduction +
                            earlyLeaveDeduction +
-                           welfareFee + 
-                           dormitoryFee + 
-                           groupInsurance + 
+                           lateArrivalDeduction +
+                           absenceDeduction +
+                           welfareFee +
+                           dormitoryFee +
+                           groupInsurance +
                            otherDeductions;
     
     // 12. 實發金額
@@ -2420,7 +2605,8 @@ function calculateMonthlySalaryInternal(employeeId, yearMonth) {
       otherAllowances: otherAllowances,
       weekdayOvertimePay: weekdayOvertimePay,
       restdayOvertimePay: restdayOvertimePay,
-      holidayWorkPay: holidayWorkPay, 
+      sundayOvertimePay: sundayOvertimePay,
+      holidayWorkPay: holidayWorkPay,
       holidayOvertimePay: holidayOvertimePay,
       totalOvertimeHours: totalOvertimeHours,
       laborFee: laborFee,              // ⭐ 使用設定表數值（可為 0）
@@ -2435,6 +2621,9 @@ function calculateMonthlySalaryInternal(employeeId, yearMonth) {
       personalLeaveHours: personalLeaveHours,
       personalLeaveDeduction: personalLeaveDeduction,
       earlyLeaveDeduction: earlyLeaveDeduction,
+      lateArrivalDeduction: lateArrivalDeduction,
+      absenceDays: absenceDays,
+      absenceDeduction: absenceDeduction,
       welfareFee: welfareFee,
       dormitoryFee: dormitoryFee,
       groupInsurance: groupInsurance,
@@ -2448,7 +2637,9 @@ function calculateMonthlySalaryInternal(employeeId, yearMonth) {
         (holidayCompHours > 0 ? `，國定假日補休${holidayCompHours.toFixed(1)}h` : '') +
         (sickLeaveHours > 0 ? `，病假${sickLeaveHours}h(半薪)` : '') +
         (personalLeaveHours > 0 ? `，事假${personalLeaveHours}h` : '') +
-        (earlyLeaveDeduction > 0 ? `，早退扣款$${earlyLeaveDeduction}` : '')
+        (earlyLeaveDeduction > 0 ? `，早退扣款$${earlyLeaveDeduction}` : '') +
+        (lateArrivalDeduction > 0 ? `，遲到扣款$${lateArrivalDeduction}` : '') +
+        (absenceDays > 0 ? `，曠職${absenceDays}天扣款$${absenceDeduction}` : '')
     };
     
     Logger.log(' 月薪計算完成');

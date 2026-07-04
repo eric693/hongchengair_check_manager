@@ -38,21 +38,46 @@ function getWorklogSheet() {
     ];
     
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    
+
     // 格式化標題列
     const headerRange = sheet.getRange(1, 1, 1, headers.length);
     headerRange.setBackground('#4285f4')
                .setFontColor('#ffffff')
                .setFontWeight('bold')
                .setHorizontalAlignment('center');
-    
+
     // 凍結標題列
     sheet.setFrozenRows(1);
-    
+
     Logger.log(' 工作日誌工作表已建立');
   }
-  
+
+  // ⭐ 非破壞性地補上「客戶ID」「客戶名稱」欄位（供客戶檔案模組關聯服務日誌用）
+  ensureWorklogCustomerColumns_(sheet);
+
   return sheet;
+}
+
+/**
+ *  非破壞性地為既有「工作日誌」試算表補上客戶關聯欄位（不刪除既有資料）
+ */
+function ensureWorklogCustomerColumns_(sheet) {
+  try {
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const requiredHeaders = ['客戶ID', '客戶名稱'];
+    const missingHeaders = requiredHeaders.filter(h => headers.indexOf(h) === -1);
+
+    if (missingHeaders.length > 0) {
+      sheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setValues([missingHeaders]);
+      sheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setFontWeight('bold');
+      sheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setBackground('#4285f4');
+      sheet.getRange(1, lastCol + 1, 1, missingHeaders.length).setFontColor('#ffffff');
+      Logger.log(' 已為工作日誌表補上欄位: ' + missingHeaders.join(', '));
+    }
+  } catch (error) {
+    Logger.log(' ensureWorklogCustomerColumns_ 失敗: ' + error.message);
+  }
 }
 
 // ==================== 新增工作日誌 ====================
@@ -60,7 +85,7 @@ function getWorklogSheet() {
 /**
  *  提交工作日誌
  */
-function submitWorklog(userId, userName, department, date, hours, content) {
+function submitWorklog(userId, userName, department, date, hours, content, customerId, customerName) {
   try {
     Logger.log('═══════════════════════════════════════');
     Logger.log(' 開始提交工作日誌');
@@ -118,7 +143,9 @@ function submitWorklog(userId, userName, department, date, hours, content) {
       submittedAt,                  // I: 提交時間
       '',                           // J: 審核人
       '',                           // K: 審核時間
-      ''                            // L: 審核意見
+      '',                           // L: 審核意見
+      customerId || '',             // M: 客戶ID（選填，關聯客戶檔案模組）
+      customerName || ''            // N: 客戶名稱（選填）
     ];
     
     sheet.appendRow(newRow);

@@ -1397,14 +1397,35 @@ function updateReviewStatus(rowNumber, status, note) {
         ];
         
         attendanceSheet.appendRow(row);
-        
+
         Logger.log(' 已寫入出勤紀錄');
         Logger.log('   寫入內容: ' + JSON.stringify(row));
+
+        //  補打卡核准後自動重算並儲存薪資
+        try {
+          const yearMonth = punchDate.substring(0, 7);
+          Logger.log(` 開始更新 ${employeeName} 的 ${yearMonth} 薪資（補打卡核准觸發）...`);
+
+          const recalcResult = calculateMonthlySalary(userId, yearMonth);
+
+          if (recalcResult.success) {
+            const saveResult = saveMonthlySalary(recalcResult.data);
+            if (saveResult.success) {
+              Logger.log(` 已自動更新 ${employeeName} 的 ${yearMonth} 薪資`);
+            } else {
+              Logger.log(` 薪資儲存失敗: ${saveResult.message}`);
+            }
+          } else {
+            Logger.log(` 薪資計算失敗: ${recalcResult.message}`);
+          }
+        } catch (recalcError) {
+          Logger.log(` 自動更新薪資時發生錯誤: ${recalcError.message}`);
+        }
       } else {
         Logger.log(' 找不到出勤紀錄工作表');
       }
     }
-    
+
     //  發送 LINE 通知
     const isApproved = (status === "v");
     

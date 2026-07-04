@@ -130,6 +130,20 @@ function doGet(e) {
         return respond1(handleGetWorklogReport(e.parameter));
       case "getAllWorklogReport":  
         return respond1(handleGetAllWorklogReport(e.parameter));
+      // ==================== 客戶檔案系統 ====================
+      case "addCustomer":
+        return respond1(handleAddCustomer(e.parameter));
+      case "updateCustomer":
+        return respond1(handleUpdateCustomer(e.parameter));
+      case "deleteCustomer":
+        return respond1(handleDeleteCustomer(e.parameter));
+      case "getAllCustomers":
+        return respond1(handleGetAllCustomers(e.parameter));
+      case "getCustomerById":
+        return respond1(handleGetCustomerById(e.parameter));
+      case "getCustomerWorklogs":
+        return respond1(handleGetCustomerWorklogs(e.parameter));
+
       // ==================== 排班系統 ====================
       case "addShift":
         return respond1(handleAddShift(e.parameter));
