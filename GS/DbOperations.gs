@@ -1200,7 +1200,9 @@ function getReviewRequest() {
     const dateValue = row[headers.indexOf('日期')];  // ⭐ 關鍵：可能是字串或 Date
     const timeValue = row[headers.indexOf('時間')];  // ⭐ 關鍵：可能是字串或 Date
     const type = row[headers.indexOf('類型')];
-    const reason = row[headers.indexOf('原因')];
+    const reasonRaw = row[headers.indexOf('原因')];
+    // ⭐ 修正：原因欄位可能被 Sheets 讀成 Date / Number，統一轉成字串再用字串方法
+    const reason = (reasonRaw === null || reasonRaw === undefined) ? '' : String(reasonRaw);
     const applicationTime = row[headers.indexOf('申請時間')];
     
     //  修正：智能格式化日期
@@ -1226,7 +1228,7 @@ function getReviewRequest() {
     
     Logger.log(`   ${actualRowNumber}. ${name} - ${date} ${time} ${type}`);
     Logger.log(`      理由: ${reason}`);
-    const isTodayAdjust = reason && reason.includes('【當日修正】');
+    const isTodayAdjust = reason.indexOf('【當日修正】') !== -1;
     
     return {
       id: actualRowNumber,
